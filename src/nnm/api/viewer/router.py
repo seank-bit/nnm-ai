@@ -12,6 +12,8 @@ router = APIRouter()
 _templates_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_templates_dir))
 
+PAGE_SIZE = 50
+
 
 @router.get("/")
 async def dashboard(request: Request, db: DbDep):
@@ -37,5 +39,34 @@ async def dashboard(request: Request, db: DbDep):
             "total_papers": total_papers, "total_chunks": total_chunks,
             "by_status": by_status, "mapping_rate": mapping_rate,
             "recent_jobs": recent_jobs,
+        },
+    )
+
+
+@router.get("/papers")
+async def papers_list(
+    request: Request, db: DbDep,
+    page: int = 1, language: str | None = None, status: str | None = None,
+):
+    q = select(
+        Paper.id, Paper.title, Paper.external_id, Paper.language,
+        Paper.published_year, Paper.status,
+        select(func.count(Chunk.id))
+        .where(Chunk.paper_id == Paper.id).scalar_subquery().label("chunk_count"),
+    )
+    if language:
+        q = q.where(Paper.language == language)
+    if status:
+        q = q.where(Paper.status == status)
+    q = q.order_by(Paper.id.desc()).offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1)
+
+    rows = (await db.execute(q)).all()
+    has_next = len(rows) > PAGE_SIZE
+    papers = rows[:PAGE_SIZE]
+    return templates.TemplateResponse(
+        request, "papers_list.html",
+        {
+            "papers": papers, "page": page, "has_next": has_next,
+            "filters": {"language": language, "status": status},
         },
     )

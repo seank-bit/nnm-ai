@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Papers</h1>
+<form class="flex gap-2 mb-4">
+  <input name="language" value="{{ filters.language or '' }}" placeholder="language"
+         class="border px-2 py-1 rounded">
+  <input name="status" value="{{ filters.status or '' }}" placeholder="status"
+         class="border px-2 py-1 rounded">
+  <button class="bg-blue-600 text-white px-3 py-1 rounded">필터</button>
+</form>
+<table class="w-full bg-white shadow rounded text-sm">
+  <thead><tr>
+    <th class="text-left p-2">id</th><th class="text-left p-2">title</th>
+    <th class="text-left p-2">external_id</th><th class="text-left p-2">lang</th>
+    <th class="text-left p-2">year</th><th class="text-left p-2">status</th>
+    <th class="text-right p-2">chunks</th>
+  </tr></thead>
+  <tbody>
+    {% for p in papers %}
+    <tr class="border-t">
+      <td class="p-2"><a class="text-blue-600" href="/viewer/papers/{{ p.id }}">{{ p.id }}</a></td>
+      <td class="p-2">{{ p.title or '—' }}</td>
+      <td class="p-2 font-mono text-xs">{{ p.external_id or '—' }}</td>
+      <td class="p-2">{{ p.language or '' }}</td>
+      <td class="p-2">{{ p.published_year or '' }}</td>
+      <td class="p-2">{{ p.status }}</td>
+      <td class="text-right p-2">{{ p.chunk_count }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<div class="mt-4 flex gap-2">
+  {% if page > 1 %}<a class="px-3 py-1 border rounded" href="?page={{ page - 1 }}">이전</a>{% endif %}
+  <span class="px-3 py-1">page {{ page }}</span>
+  {% if has_next %}<a class="px-3 py-1 border rounded" href="?page={{ page + 1 }}">다음</a>{% endif %}
+</div>
+{% endblock %}
