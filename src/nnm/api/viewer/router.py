@@ -6,7 +6,8 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 
 from nnm.api.deps import DbDep
-from nnm.db.models import Chunk, IngestJob, Paper
+from nnm.db.models import Chunk, ChunkEmbedding, IngestJob, Paper
+from nnm.errors import PaperNotFound
 
 router = APIRouter()
 _templates_dir = Path(__file__).parent / "templates"
@@ -69,4 +70,32 @@ async def papers_list(
             "papers": papers, "page": page, "has_next": has_next,
             "filters": {"language": language, "status": status},
         },
+    )
+
+
+@router.get("/papers/{paper_id}")
+async def paper_detail(request: Request, paper_id: int, db: DbDep):
+    paper = await db.get(Paper, paper_id)
+    if paper is None:
+        raise PaperNotFound(f"paper {paper_id} not found")
+    chunks = (await db.scalars(
+        select(Chunk).where(Chunk.paper_id == paper_id).order_by(Chunk.seq)
+    )).all()
+    return templates.TemplateResponse(
+        request, "paper_detail.html",
+        {"paper": paper, "chunks": chunks},
+    )
+
+
+@router.get("/chunks/{chunk_id}")
+async def chunk_detail(request: Request, chunk_id: int, db: DbDep):
+    chunk = await db.get(Chunk, chunk_id)
+    if chunk is None:
+        raise PaperNotFound(f"chunk {chunk_id} not found")
+    embedding = (await db.scalars(
+        select(ChunkEmbedding).where(ChunkEmbedding.chunk_id == chunk_id)
+    )).first()
+    return templates.TemplateResponse(
+        request, "chunk_detail.html",
+        {"chunk": chunk, "embedding": embedding},
     )

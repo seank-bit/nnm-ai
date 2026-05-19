@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-2">{{ paper.title or "(no title)" }}</h1>
+<div class="text-sm text-gray-500 mb-4">
+  id={{ paper.id }} · external_id={{ paper.external_id or "—" }} · lang={{ paper.language or "" }}
+</div>
+<div class="grid grid-cols-2 gap-4 mb-6 text-sm">
+  <div>s3_key: <code>{{ paper.s3_key }}</code></div>
+  <div>hash: <code class="text-xs">{{ paper.file_hash }}</code></div>
+  <div>raw_json: <code>{{ paper.raw_json_path or "—" }}</code></div>
+  <div>raw_md: <code>{{ paper.raw_md_path or "—" }}</code></div>
+  <div>status: {{ paper.status }}</div>
+  <div>pages: {{ paper.page_count or "—" }}</div>
+</div>
+<h2 class="text-xl font-semibold mb-2">청크 ({{ chunks|length }}개)</h2>
+<table class="w-full bg-white shadow rounded text-sm">
+  <thead><tr>
+    <th class="text-left p-2">seq</th><th class="text-left p-2">section</th>
+    <th class="text-right p-2">tok</th><th class="text-left p-2">preview</th>
+  </tr></thead>
+  <tbody>
+    {% for c in chunks %}
+    <tr class="border-t">
+      <td class="p-2"><a class="text-blue-600" href="/viewer/chunks/{{ c.id }}">{{ c.seq }}</a></td>
+      <td class="p-2">{{ c.section or "" }}</td>
+      <td class="text-right p-2">{{ c.token_count }}</td>
+      <td class="p-2 text-xs">{{ c.text[:120] }}…</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

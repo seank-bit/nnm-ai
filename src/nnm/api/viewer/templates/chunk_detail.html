@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="text-sm mb-2"><a href="/viewer/papers/{{ chunk.paper_id }}">← back to paper</a></div>
+<h1 class="text-2xl font-bold mb-2">Chunk #{{ chunk.id }} (seq {{ chunk.seq }})</h1>
+<div class="text-sm text-gray-500 mb-4">
+  section={{ chunk.section or "—" }} · tokens={{ chunk.token_count }} · chars={{ chunk.char_count }}
+</div>
+<h3 class="font-semibold mt-4">text_for_embed</h3>
+<pre class="bg-white p-3 rounded shadow text-sm whitespace-pre-wrap">{{ chunk.text_for_embed }}</pre>
+<h3 class="font-semibold mt-4">text (raw)</h3>
+<pre class="bg-white p-3 rounded shadow text-sm whitespace-pre-wrap">{{ chunk.text }}</pre>
+{% if embedding %}
+<h3 class="font-semibold mt-4">embedding</h3>
+<div class="text-sm">
+  model: {{ embedding.model_name }} v{{ embedding.model_version }}<br>
+  dense dim: {{ embedding.dense|length }}<br>
+  sparse tokens: {{ (embedding.sparse or {})|length }}<br>
+  colbert: <code>{{ embedding.colbert_path or "—" }}</code>
+</div>
+{% endif %}
+{% endblock %}
