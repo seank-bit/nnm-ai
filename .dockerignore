@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+var/extracted
+var/colbert
+var/pgdata
+*.pyc
+.mypy_cache
+.ruff_cache
+.pytest_cache
+docs
+tests
