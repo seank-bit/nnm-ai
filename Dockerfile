@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir uv==0.5.4
 RUN uv venv "$VIRTUAL_ENV"
 
 WORKDIR /app
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 COPY src ./src
 COPY alembic.ini ./
 
