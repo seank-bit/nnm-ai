@@ -1,0 +1,24 @@
+services:
+  app:
+    build:
+      context: .
+      args: { DEVICE: cpu }
+    environment:
+      NNM_ENV: local
+      NNM_DB_URL: ${NNM_DB_URL}
+      NNM_S3_BUCKET: ${NNM_S3_BUCKET}
+      NNM_S3_REGION: ${NNM_S3_REGION:-ap-northeast-2}
+      NNM_S3_PREFIX: ${NNM_S3_PREFIX:-papers/}
+      NNM_EMBEDDING_DEVICE: cpu
+      NNM_EMBEDDING_FP16: "false"
+      NNM_EMBEDDING_BATCH_SIZE: "4"
+      NNM_EMBEDDING_MAX_TOKENS: "8192"
+      NNM_STORAGE_ROOT: /app/var
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    volumes:
+      - ./var:/app/var
+    ports: ["8000:8000"]
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn nnm.main:app --host 0.0.0.0 --port 8000 --reload"
