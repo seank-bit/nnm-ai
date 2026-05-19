@@ -1,0 +1,20 @@
+from __future__ import annotations
+from typing import Protocol
+
+import numpy as np
+
+from nnm.domain.chunk import ChunkDraft
+from nnm.domain.paper import PaperMeta
+
+
+class BackfillRepository(Protocol):
+    async def find_paper_by_hash(self, file_hash: str) -> int | None: ...
+    async def insert_paper(self, meta: PaperMeta) -> int: ...
+    async def insert_chunks(self, paper_id: int, drafts: list[ChunkDraft]) -> list[int]: ...
+    async def insert_embeddings(
+        self, *, chunk_ids: list[int],
+        dense: np.ndarray, sparse: list[dict[int, float]],
+        colbert_paths: list[str | None],
+    ) -> None: ...
+    async def mark_item_done(self, job_id: int, s3_key: str, *, paper_id: int) -> None: ...
+    async def mark_item_failed(self, job_id: int, s3_key: str, reason: str) -> None: ...
