@@ -6,7 +6,7 @@ from nnm.config import Settings, get_settings
 def test_settings_required_db_url(monkeypatch):
     monkeypatch.delenv("NNM_DB_URL", raising=False)
     with pytest.raises(ValueError):
-        Settings(s3_bucket="bucket")  # type: ignore[call-arg]
+        Settings(s3_bucket="bucket")
 
 
 def test_settings_defaults(monkeypatch):
