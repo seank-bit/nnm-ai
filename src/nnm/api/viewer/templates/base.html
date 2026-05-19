@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}nnm-ai{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <nav class="bg-white border-b px-6 py-3 flex gap-6">
+    <a href="/viewer/" class="font-semibold">Dashboard</a>
+    <a href="/viewer/papers">Papers</a>
+    <a href="/viewer/jobs">Ingest jobs</a>
+  </nav>
+  <main class="max-w-6xl mx-auto p-6">{% block content %}{% endblock %}</main>
+</body>
+</html>
