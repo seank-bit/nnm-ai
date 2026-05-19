@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 
 from nnm.api.deps import DbDep
-from nnm.db.models import Chunk, ChunkEmbedding, IngestJob, Paper
+from nnm.db.models import Chunk, ChunkEmbedding, IngestJob, IngestJobItem, Paper
 from nnm.errors import PaperNotFound
 
 router = APIRouter()
@@ -98,4 +98,19 @@ async def chunk_detail(request: Request, chunk_id: int, db: DbDep):
     return templates.TemplateResponse(
         request, "chunk_detail.html",
         {"chunk": chunk, "embedding": embedding},
+    )
+
+
+@router.get("/jobs")
+async def jobs(request: Request, db: DbDep):
+    jobs_rows = (await db.scalars(
+        select(IngestJob).order_by(IngestJob.started_at.desc()).limit(50)
+    )).all()
+    failures = (await db.scalars(
+        select(IngestJobItem).where(IngestJobItem.status == "failed")
+        .order_by(IngestJobItem.updated_at.desc()).limit(50)
+    )).all()
+    return templates.TemplateResponse(
+        request, "jobs.html",
+        {"jobs": jobs_rows, "recent_failures": failures},
     )

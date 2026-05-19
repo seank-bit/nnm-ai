@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Ingest jobs</h1>
+<table class="w-full bg-white shadow rounded text-sm">
+  <thead><tr>
+    <th class="text-left p-2">id</th><th class="text-left p-2">job_name</th>
+    <th class="text-left p-2">prefix</th><th class="text-right p-2">processed</th>
+    <th class="text-right p-2">failed</th><th class="text-left p-2">시작</th>
+    <th class="text-left p-2">종료</th>
+  </tr></thead>
+  <tbody>
+    {% for j in jobs %}
+    <tr class="border-t">
+      <td class="p-2">{{ j.id }}</td><td class="p-2">{{ j.job_name }}</td>
+      <td class="p-2 font-mono text-xs">{{ j.s3_prefix }}</td>
+      <td class="text-right p-2">{{ j.processed }}</td>
+      <td class="text-right p-2 {% if j.failed %}text-red-600 font-bold{% endif %}">{{ j.failed }}</td>
+      <td class="p-2">{{ j.started_at }}</td>
+      <td class="p-2">{{ j.finished_at or "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<h2 class="text-xl font-semibold mt-6 mb-2">최근 실패 항목</h2>
+<table class="w-full bg-white shadow rounded text-sm">
+  <thead><tr>
+    <th class="text-left p-2">job</th><th class="text-left p-2">s3_key</th>
+    <th class="text-left p-2">error</th><th class="text-right p-2">attempts</th>
+  </tr></thead>
+  <tbody>
+    {% for f in recent_failures %}
+    <tr class="border-t">
+      <td class="p-2">{{ f.job_id }}</td>
+      <td class="p-2 font-mono text-xs">{{ f.s3_key }}</td>
+      <td class="p-2 text-xs">{{ f.error }}</td>
+      <td class="text-right p-2">{{ f.attempts }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
