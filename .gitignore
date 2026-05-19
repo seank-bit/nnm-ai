@@ -20,3 +20,4 @@ var/pgdata/
 .dockerignore.local
 .DS_Store
 Thumbs.db
+.omc/
