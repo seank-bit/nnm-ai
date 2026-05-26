@@ -1,37 +1,74 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Papers · nnm-ai{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">Papers</h1>
-<form class="flex gap-2 mb-4">
+<header class="mb-6 flex items-end justify-between">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight text-zinc-900">Papers</h1>
+    <p class="mt-1 text-sm text-zinc-500">인제스트된 논문 목록</p>
+  </div>
+</header>
+
+<form method="get" class="mb-4 flex flex-wrap items-center gap-2">
   <input name="language" value="{{ filters.language or '' }}" placeholder="language"
-         class="border px-2 py-1 rounded">
+         class="h-9 w-32 rounded-md border border-zinc-200 bg-white px-3 text-sm
+                placeholder-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
   <input name="status" value="{{ filters.status or '' }}" placeholder="status"
-         class="border px-2 py-1 rounded">
-  <button class="bg-blue-600 text-white px-3 py-1 rounded">필터</button>
+         class="h-9 w-32 rounded-md border border-zinc-200 bg-white px-3 text-sm
+                placeholder-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+  <button type="submit"
+          class="inline-flex h-9 items-center rounded-md bg-zinc-900 px-3 text-sm font-medium text-white hover:bg-zinc-800">
+    Filter
+  </button>
+  {% if filters.language or filters.status %}
+  <a href="/viewer/papers"
+     class="inline-flex h-9 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-700 hover:bg-zinc-50">
+    Clear
+  </a>
+  {% endif %}
 </form>
-<table class="w-full bg-white shadow rounded text-sm">
-  <thead><tr>
-    <th class="text-left p-2">id</th><th class="text-left p-2">title</th>
-    <th class="text-left p-2">external_id</th><th class="text-left p-2">lang</th>
-    <th class="text-left p-2">year</th><th class="text-left p-2">status</th>
-    <th class="text-right p-2">chunks</th>
-  </tr></thead>
-  <tbody>
-    {% for p in papers %}
-    <tr class="border-t">
-      <td class="p-2"><a class="text-blue-600" href="/viewer/papers/{{ p.id }}">{{ p.id }}</a></td>
-      <td class="p-2">{{ p.title or '—' }}</td>
-      <td class="p-2 font-mono text-xs">{{ p.external_id or '—' }}</td>
-      <td class="p-2">{{ p.language or '' }}</td>
-      <td class="p-2">{{ p.published_year or '' }}</td>
-      <td class="p-2">{{ p.status }}</td>
-      <td class="text-right p-2">{{ p.chunk_count }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-<div class="mt-4 flex gap-2">
-  {% if page > 1 %}<a class="px-3 py-1 border rounded" href="?page={{ page - 1 }}">이전</a>{% endif %}
-  <span class="px-3 py-1">page {{ page }}</span>
-  {% if has_next %}<a class="px-3 py-1 border rounded" href="?page={{ page + 1 }}">다음</a>{% endif %}
+
+<div class="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-zinc-200 bg-zinc-50/60 text-left text-xs uppercase tracking-wide text-zinc-500">
+        <th class="px-4 py-2.5 font-medium">ID</th>
+        <th class="px-4 py-2.5 font-medium">Title</th>
+        <th class="px-4 py-2.5 font-medium">Lang</th>
+        <th class="px-4 py-2.5 font-medium">Year</th>
+        <th class="px-4 py-2.5 font-medium">Status</th>
+        <th class="px-4 py-2.5 text-right font-medium">Chunks</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-zinc-100">
+      {% for p in papers %}
+      <tr class="hover:bg-zinc-50">
+        <td class="px-4 py-3 align-top font-mono text-xs text-zinc-500">
+          <a class="text-indigo-600 hover:text-indigo-700" href="/viewer/papers/{{ p.id }}">#{{ p.id }}</a>
+        </td>
+        <td class="px-4 py-3 align-top">
+          <div class="text-sm font-medium text-zinc-900">
+            <a class="hover:text-indigo-700" href="/viewer/papers/{{ p.id }}">{{ p.title or '(no title)' }}</a>
+          </div>
+          {% if p.external_id %}
+          <div class="mt-0.5 font-mono text-xs text-zinc-500">{{ p.external_id }}</div>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 align-top text-sm text-zinc-700">{{ p.language or '—' }}</td>
+        <td class="px-4 py-3 align-top tabular-nums text-sm text-zinc-700">{{ p.published_year or '—' }}</td>
+        <td class="px-4 py-3 align-top">{{ m.status_pill(p.status) }}</td>
+        <td class="px-4 py-3 align-top text-right tabular-nums text-sm text-zinc-900">{{ p.chunk_count }}</td>
+      </tr>
+      {% endfor %}
+      {% if not papers %}
+      <tr><td colspan="6" class="px-4 py-10 text-center text-sm text-zinc-400">결과 없음</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
 </div>
+
+{% set q = [] %}
+{% if filters.language %}{% set _ = q.append('language=' ~ filters.language) %}{% endif %}
+{% if filters.status %}{% set _ = q.append('status=' ~ filters.status) %}{% endif %}
+{{ m.pagination(page, has_next, (q|join('&') ~ ('&' if q else ''))) }}
 {% endblock %}

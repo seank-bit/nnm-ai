@@ -52,8 +52,9 @@ class LocalEmbedder:
             return_dense=return_dense, return_sparse=return_sparse,
             return_colbert_vecs=return_colbert,
         )
+        n = len(texts)
         return EmbeddingPayload(
             dense=out["dense_vecs"],
-            sparse=out.get("lexical_weights", [{}] * len(texts)),
-            colbert=out.get("colbert_vecs", [None] * len(texts)),
+            sparse=out.get("lexical_weights") or [{}] * n,
+            colbert=out.get("colbert_vecs") or [None] * n,
         )

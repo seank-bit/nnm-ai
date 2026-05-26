@@ -14,7 +14,7 @@ docker compose run --rm app python -m nnm.workers.backfill_cli ingest --prefix p
 docker compose run --rm app python -m nnm.workers.backfill_cli reset-db --force
 
 # 뷰어
-open http://localhost:8000/viewer/
+open http://localhost:8170/viewer/
 ```
 
 ## EC2 GPU

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nnm.db.models import Chunk, ChunkEmbedding, IngestJobItem, Paper
@@ -66,12 +66,16 @@ class SqlBackfillRepository:
             ChunkEmbedding(
                 chunk_id=cid, model_name=self.model_name, model_version=self.model_version,
                 dense=dense[i].tolist(),
-                sparse={str(k): v for k, v in sparse[i].items()} if sparse[i] else None,
+                sparse={str(k): float(v) for k, v in sparse[i].items()} if sparse[i] else None,
                 colbert_path=colbert_paths[i],
             )
             for i, cid in enumerate(chunk_ids)
         ]
         self.db.add_all(rows)
+        await self.db.commit()
+
+    async def delete_paper(self, paper_id: int) -> None:
+        await self.db.execute(delete(Paper).where(Paper.id == paper_id))
         await self.db.commit()
 
     async def mark_item_done(self, job_id: int, s3_key: str, *, paper_id: int) -> None:

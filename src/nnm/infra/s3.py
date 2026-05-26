@@ -33,6 +33,12 @@ class S3Loader:
             for obj in page.get("Contents", []):
                 yield obj["Key"]
 
+    async def count_objects(self, prefix: str) -> int:
+        total = 0
+        async for page in self._paginate(prefix):
+            total += page.get("KeyCount", 0)
+        return total
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=4))
     async def _get_bytes(self, key: str) -> bytes:
         async with self._client_ctx() as s3:

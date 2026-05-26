@@ -22,7 +22,7 @@
 ```bash
 docker compose up app
 ```
-기대: alembic upgrade head 후 0007 도달, `Uvicorn running on http://0.0.0.0:8000`
+기대: alembic upgrade head 후 0007 도달, `Uvicorn running on http://0.0.0.0:8170`
 
 ### 2. 헬스/뷰어 확인
 ```bash

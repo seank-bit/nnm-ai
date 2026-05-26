@@ -1,21 +1,57 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Chunk #{{ chunk.id }} · nnm-ai{% endblock %}
 {% block content %}
-<div class="text-sm mb-2"><a href="/viewer/papers/{{ chunk.paper_id }}">← back to paper</a></div>
-<h1 class="text-2xl font-bold mb-2">Chunk #{{ chunk.id }} (seq {{ chunk.seq }})</h1>
-<div class="text-sm text-gray-500 mb-4">
-  section={{ chunk.section or "—" }} · tokens={{ chunk.token_count }} · chars={{ chunk.char_count }}
-</div>
-<h3 class="font-semibold mt-4">text_for_embed</h3>
-<pre class="bg-white p-3 rounded shadow text-sm whitespace-pre-wrap">{{ chunk.text_for_embed }}</pre>
-<h3 class="font-semibold mt-4">text (raw)</h3>
-<pre class="bg-white p-3 rounded shadow text-sm whitespace-pre-wrap">{{ chunk.text }}</pre>
+<nav class="mb-4 text-sm text-zinc-500">
+  <a href="/viewer/papers" class="hover:text-zinc-900">Papers</a>
+  <span class="mx-1.5 text-zinc-300">/</span>
+  <a href="/viewer/papers/{{ chunk.paper_id }}" class="hover:text-zinc-900 font-mono">#{{ chunk.paper_id }}</a>
+  <span class="mx-1.5 text-zinc-300">/</span>
+  <span class="font-mono text-zinc-500">Chunk #{{ chunk.id }}</span>
+</nav>
+
+<header class="mb-6">
+  <h1 class="text-2xl font-semibold tracking-tight text-zinc-900">Chunk #{{ chunk.id }}</h1>
+  <div class="mt-3 flex flex-wrap items-center gap-2">
+    {{ m.chip('seq ' ~ chunk.seq) }}
+    {% if chunk.section %}{{ m.chip(chunk.section) }}{% endif %}
+    {{ m.chip(chunk.token_count ~ ' tokens', 'info') }}
+    {{ m.chip(chunk.char_count ~ ' chars') }}
+    {% if chunk.language %}{{ m.chip(chunk.language) }}{% endif %}
+  </div>
+</header>
+
+<section class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+  <h2 class="mb-3 text-sm font-semibold text-zinc-900">text_for_embed</h2>
+  <pre class="overflow-x-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 font-mono text-xs leading-relaxed text-zinc-700">{{ chunk.text_for_embed }}</pre>
+</section>
+
+<section class="mt-6 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+  <h2 class="mb-3 text-sm font-semibold text-zinc-900">text (raw)</h2>
+  <pre class="overflow-x-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 font-mono text-xs leading-relaxed text-zinc-700">{{ chunk.text }}</pre>
+</section>
+
 {% if embedding %}
-<h3 class="font-semibold mt-4">embedding</h3>
-<div class="text-sm">
-  model: {{ embedding.model_name }} v{{ embedding.model_version }}<br>
-  dense dim: {{ embedding.dense|length }}<br>
-  sparse tokens: {{ (embedding.sparse or {})|length }}<br>
-  colbert: <code>{{ embedding.colbert_path or "—" }}</code>
-</div>
+<section class="mt-6 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+  <h2 class="mb-4 text-sm font-semibold text-zinc-900">Embedding</h2>
+  <dl class="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+    <div>
+      <dt class="font-mono text-[11px] uppercase tracking-wide text-zinc-500">model</dt>
+      <dd class="mt-0.5 text-sm text-zinc-900">{{ embedding.model_name }} <span class="text-zinc-500">v{{ embedding.model_version }}</span></dd>
+    </div>
+    <div>
+      <dt class="font-mono text-[11px] uppercase tracking-wide text-zinc-500">dense dim</dt>
+      <dd class="mt-0.5 tabular-nums text-sm text-zinc-900">{{ embedding.dense|length }}</dd>
+    </div>
+    <div>
+      <dt class="font-mono text-[11px] uppercase tracking-wide text-zinc-500">sparse tokens</dt>
+      <dd class="mt-0.5 tabular-nums text-sm text-zinc-900">{{ (embedding.sparse or {})|length }}</dd>
+    </div>
+    <div>
+      <dt class="font-mono text-[11px] uppercase tracking-wide text-zinc-500">colbert</dt>
+      <dd class="mt-0.5 break-all font-mono text-xs text-zinc-700">{{ embedding.colbert_path or '—' }}</dd>
+    </div>
+  </dl>
+</section>
 {% endif %}
 {% endblock %}

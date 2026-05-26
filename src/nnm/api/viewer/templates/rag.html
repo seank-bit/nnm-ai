@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}RAG · nnm-ai{% endblock %}
+{% block content %}
+<header class="mb-8">
+  <h1 class="text-2xl font-semibold tracking-tight text-zinc-900">RAG playground</h1>
+  <p class="mt-1 text-sm text-zinc-500">
+    질문을 bge-m3 임베딩으로 변환하여 pgvector 유사도 검색 후 Groq LLM 으로 답변을 생성합니다.
+  </p>
+</header>
+
+<section class="mb-6 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+  <div class="mb-4 flex items-center gap-2 text-xs">
+    <span class="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-zinc-600">
+      model: <span class="font-mono">{{ model }}</span>
+    </span>
+    <span class="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-zinc-600">
+      top_k: {{ top_k }}
+    </span>
+    {% if key_configured %}
+    <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+      ● API key 설정됨
+    </span>
+    {% else %}
+    <span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+      ⚠ NNM_GROQ_API_KEY 비어있음 (.env 확인)
+    </span>
+    {% endif %}
+  </div>
+
+  <form method="post" action="/viewer/rag" class="space-y-3">
+    <label for="question" class="block text-sm font-medium text-zinc-700">질문</label>
+    <textarea id="question" name="question" rows="3" required
+              class="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm shadow-sm
+                     focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              placeholder="예: 이 논문들에서 transformer 의 attention 계산은 어떻게 정의되는가?">{{ question or '' }}</textarea>
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-zinc-500">컨텍스트는 검색된 chunk 의 텍스트로만 구성됩니다.</p>
+      <button type="submit"
+              class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white
+                     shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        Ask
+      </button>
+    </div>
+  </form>
+</section>
+
+{% if error %}
+<section class="mb-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+  <strong class="font-semibold">오류:</strong> {{ error }}
+</section>
+{% endif %}
+
+{% if result %}
+<section class="mb-6 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+  <h2 class="mb-2 text-sm font-semibold text-zinc-900">Answer</h2>
+  <div class="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800">{{ result.answer }}</div>
+  <div class="mt-3 text-xs text-zinc-500">model: <span class="font-mono">{{ result.model }}</span></div>
+</section>
+
+<section class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+  <h2 class="mb-4 text-sm font-semibold text-zinc-900">Retrieved chunks ({{ result.chunks|length }})</h2>
+  <ul class="divide-y divide-zinc-100">
+    {% for c in result.chunks %}
+    <li class="py-4">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <a href="/viewer/chunks/{{ c.chunk_id }}"
+             class="font-mono text-xs text-indigo-600 hover:text-indigo-700">#{{ c.chunk_id }}</a>
+          <a href="/viewer/papers/{{ c.paper_id }}"
+             class="ml-2 truncate text-sm font-medium text-zinc-900 hover:underline">
+            {{ c.paper_title or ('paper ' ~ c.paper_id) }}
+          </a>
+          <div class="mt-0.5 text-xs text-zinc-500">
+            seq {{ c.seq }}{% if c.section %} · {{ c.section }}{% endif %}
+          </div>
+        </div>
+        <span class="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 font-mono text-xs text-zinc-600">
+          score {{ '%.3f' % c.score }}
+        </span>
+      </div>
+      <p class="mt-2 line-clamp-4 text-sm text-zinc-700">{{ c.text }}</p>
+    </li>
+    {% endfor %}
+    {% if not result.chunks %}
+    <li class="py-6 text-center text-sm text-zinc-400">검색된 chunk 없음 — 데이터가 임베딩되어 있는지 확인하세요.</li>
+    {% endif %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

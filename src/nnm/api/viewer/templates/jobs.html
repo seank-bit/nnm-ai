@@ -1,41 +1,81 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Jobs · nnm-ai{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">Ingest jobs</h1>
-<table class="w-full bg-white shadow rounded text-sm">
-  <thead><tr>
-    <th class="text-left p-2">id</th><th class="text-left p-2">job_name</th>
-    <th class="text-left p-2">prefix</th><th class="text-right p-2">processed</th>
-    <th class="text-right p-2">failed</th><th class="text-left p-2">시작</th>
-    <th class="text-left p-2">종료</th>
-  </tr></thead>
-  <tbody>
-    {% for j in jobs %}
-    <tr class="border-t">
-      <td class="p-2">{{ j.id }}</td><td class="p-2">{{ j.job_name }}</td>
-      <td class="p-2 font-mono text-xs">{{ j.s3_prefix }}</td>
-      <td class="text-right p-2">{{ j.processed }}</td>
-      <td class="text-right p-2 {% if j.failed %}text-red-600 font-bold{% endif %}">{{ j.failed }}</td>
-      <td class="p-2">{{ j.started_at }}</td>
-      <td class="p-2">{{ j.finished_at or "" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-<h2 class="text-xl font-semibold mt-6 mb-2">최근 실패 항목</h2>
-<table class="w-full bg-white shadow rounded text-sm">
-  <thead><tr>
-    <th class="text-left p-2">job</th><th class="text-left p-2">s3_key</th>
-    <th class="text-left p-2">error</th><th class="text-right p-2">attempts</th>
-  </tr></thead>
-  <tbody>
-    {% for f in recent_failures %}
-    <tr class="border-t">
-      <td class="p-2">{{ f.job_id }}</td>
-      <td class="p-2 font-mono text-xs">{{ f.s3_key }}</td>
-      <td class="p-2 text-xs">{{ f.error }}</td>
-      <td class="text-right p-2">{{ f.attempts }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<header class="mb-6">
+  <h1 class="text-2xl font-semibold tracking-tight text-zinc-900">Ingest jobs</h1>
+  <p class="mt-1 text-sm text-zinc-500">최근 ingest 작업 현황</p>
+</header>
+
+<div class="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-zinc-200 bg-zinc-50/60 text-left text-xs uppercase tracking-wide text-zinc-500">
+        <th class="px-4 py-2.5 font-medium">ID</th>
+        <th class="px-4 py-2.5 font-medium">Job</th>
+        <th class="px-4 py-2.5 font-medium">Prefix</th>
+        <th class="px-4 py-2.5 text-right font-medium">Processed</th>
+        <th class="px-4 py-2.5 text-right font-medium">Failed</th>
+        <th class="px-4 py-2.5 font-medium">Started</th>
+        <th class="px-4 py-2.5 font-medium">Finished</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-zinc-100">
+      {% for j in jobs %}
+      <tr class="hover:bg-zinc-50 {% if j.failed %}border-l-2 border-l-rose-500{% endif %}">
+        <td class="px-4 py-3 align-top font-mono text-xs text-zinc-500">#{{ j.id }}</td>
+        <td class="px-4 py-3 align-top text-sm font-medium text-zinc-900">{{ j.job_name }}</td>
+        <td class="px-4 py-3 align-top font-mono text-xs text-zinc-500 break-all">{{ j.s3_prefix }}</td>
+        <td class="px-4 py-3 align-top text-right tabular-nums text-sm text-zinc-900">{{ j.processed }}</td>
+        <td class="px-4 py-3 align-top text-right tabular-nums text-sm {{ 'text-rose-600 font-semibold' if j.failed else 'text-zinc-400' }}">
+          {{ j.failed }}
+        </td>
+        <td class="px-4 py-3 align-top font-mono text-xs text-zinc-500">
+          {{ j.started_at.strftime('%Y-%m-%d %H:%M') if j.started_at else '—' }}
+        </td>
+        <td class="px-4 py-3 align-top font-mono text-xs text-zinc-500">
+          {{ j.finished_at.strftime('%Y-%m-%d %H:%M') if j.finished_at else '—' }}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not jobs %}
+      <tr><td colspan="7" class="px-4 py-10 text-center text-sm text-zinc-400">job 없음</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<section class="mt-10">
+  <div class="mb-3 flex items-baseline justify-between">
+    <h2 class="text-sm font-semibold text-zinc-900">Recent failures</h2>
+    <span class="text-xs text-zinc-500">{{ recent_failures|length }} items</span>
+  </div>
+  <div class="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-zinc-200 bg-zinc-50/60 text-left text-xs uppercase tracking-wide text-zinc-500">
+          <th class="px-4 py-2.5 font-medium">Job</th>
+          <th class="px-4 py-2.5 font-medium">S3 key</th>
+          <th class="px-4 py-2.5 font-medium">Error</th>
+          <th class="px-4 py-2.5 text-right font-medium">Attempts</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-zinc-100">
+        {% for f in recent_failures %}
+        <tr class="hover:bg-zinc-50">
+          <td class="px-4 py-3 align-top font-mono text-xs text-zinc-500">#{{ f.job_id }}</td>
+          <td class="px-4 py-3 align-top font-mono text-xs text-zinc-700 break-all">{{ f.s3_key }}</td>
+          <td class="px-4 py-3 align-top text-xs text-rose-700" title="{{ f.error }}">
+            <div class="max-w-md truncate">{{ f.error }}</div>
+          </td>
+          <td class="px-4 py-3 align-top text-right tabular-nums text-sm text-zinc-900">{{ f.attempts }}</td>
+        </tr>
+        {% endfor %}
+        {% if not recent_failures %}
+        <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-zinc-400">실패 항목 없음 ✨</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

@@ -14,6 +14,7 @@ from nnm.services.chunker import Chunker
 from nnm.services.pdf_extractor import PdfExtractor
 from nnm.services.publication_mapper import PublicationMapper
 from nnm.services.repository import BackfillRepository
+from nnm.services.title_filter import is_garbage_title
 
 log = structlog.get_logger()
 
@@ -72,24 +73,36 @@ class BackfillService:
             await self.repo.mark_item_done(job_id, s3_key, paper_id=paper_id)
             return "ok"
 
-        chunk_ids = await self.repo.insert_chunks(paper_id, drafts)
-        payload = await self.embedder.embed([d.text_for_embed for d in drafts])
+        try:
+            chunk_ids = await self.repo.insert_chunks(paper_id, drafts)
+            settings = self.embedder.settings
+            payload = await self.embedder.embed(
+                [d.text_for_embed for d in drafts],
+                return_dense=True,
+                return_sparse=settings.embedding_sparse,
+                return_colbert=settings.embedding_colbert,
+            )
 
-        colbert_dir = self.storage_root / "colbert"
-        colbert_dir.mkdir(parents=True, exist_ok=True)
-        colbert_paths: list[str | None] = []
-        for cid, vec in zip(chunk_ids, payload.colbert):
-            if vec is None:
-                colbert_paths.append(None)
-                continue
-            p = colbert_dir / f"{cid}.npy"
-            np.save(p, vec)
-            colbert_paths.append(str(p.relative_to(self.storage_root)))
+            colbert_paths: list[str | None] = [None] * len(chunk_ids)
+            if settings.embedding_colbert:
+                colbert_dir = self.storage_root / "colbert"
+                colbert_dir.mkdir(parents=True, exist_ok=True)
+                for i, (cid, vec) in enumerate(zip(chunk_ids, payload.colbert)):
+                    if vec is None:
+                        continue
+                    p = colbert_dir / f"{cid}.npy"
+                    np.save(p, vec)
+                    colbert_paths[i] = str(p.relative_to(self.storage_root))
 
-        await self.repo.insert_embeddings(
-            chunk_ids=chunk_ids, dense=payload.dense,
-            sparse=payload.sparse, colbert_paths=colbert_paths,
-        )
+            await self.repo.insert_embeddings(
+                chunk_ids=chunk_ids, dense=payload.dense,
+                sparse=payload.sparse, colbert_paths=colbert_paths,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("backfill.partial_failure", s3_key=s3_key, paper_id=paper_id, error=str(e))
+            await self.repo.delete_paper(paper_id)
+            await self.repo.mark_item_failed(job_id, s3_key, f"post-insert failure: {e}")
+            return "failed"
         await self.repo.mark_item_done(job_id, s3_key, paper_id=paper_id)
         log.info("backfill.ok", s3_key=s3_key, paper_id=paper_id, chunks=len(drafts))
         return "ok"
@@ -97,11 +110,22 @@ class BackfillService:
 
 def _fallback_title(doc: dict) -> str | None:
     meta = doc.get("metadata") or {}
-    if meta.get("title"):
-        return str(meta["title"]).strip() or None
-    for el in doc.get("elements", []):
+    raw = meta.get("title")
+    if raw:
+        cleaned = str(raw).strip()
+        if cleaned and not is_garbage_title(cleaned):
+            return cleaned
+    elements = doc.get("elements") or []
+    for el in elements:
         if el.get("type") == "heading" and el.get("level") == 1:
-            return str(el.get("text", "")).strip() or None
+            text = str(el.get("text", "")).strip()
+            if text and len(text) >= 4:
+                return text
+    for el in elements:
+        if el.get("type") == "heading":
+            text = str(el.get("text", "")).strip()
+            if text and len(text) >= 4:
+                return text
     return None
 
 

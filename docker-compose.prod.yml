@@ -1,0 +1,48 @@
+# 운영 GPU 환경 오버라이드
+# 사용: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 사전 조건:
+#  - 호스트에 NVIDIA Driver + nvidia-container-toolkit 설치
+#  - .env 에 GPU 권장값 적용 (.env.example 참고)
+#  - `docker compose -f docker-compose.yml -f docker-compose.prod.yml build` 로 GPU 이미지 빌드
+
+services:
+  app:
+    build:
+      args:
+        DEVICE: gpu
+    environment:
+      # prod 식별 + 로그
+      NNM_ENV: ${NNM_ENV:-prod}
+      NNM_LOG_LEVEL: ${NNM_LOG_LEVEL:-INFO}
+      # DB 풀
+      NNM_DB_POOL_SIZE: ${NNM_DB_POOL_SIZE:-10}
+      NNM_DB_MAX_OVERFLOW: ${NNM_DB_MAX_OVERFLOW:-20}
+      # 임베딩 (GPU + 사전 다운로드된 로컬 모델 경로)
+      NNM_EMBEDDING_MODEL: ${NNM_EMBEDDING_MODEL:-/app/models/bge-m3}
+      NNM_EMBEDDING_DEVICE: ${NNM_EMBEDDING_DEVICE:-cuda}
+      NNM_EMBEDDING_FP16: ${NNM_EMBEDDING_FP16:-true}
+      NNM_EMBEDDING_BATCH_SIZE: ${NNM_EMBEDDING_BATCH_SIZE:-16}
+      NNM_EMBEDDING_MAX_TOKENS: ${NNM_EMBEDDING_MAX_TOKENS:-8192}
+      NNM_EMBEDDING_COLBERT: ${NNM_EMBEDDING_COLBERT:-false}
+      NNM_EMBEDDING_SPARSE: ${NNM_EMBEDDING_SPARSE:-true}
+      # PDF 추출 스레드
+      NNM_PDF_THREADS: ${NNM_PDF_THREADS:-4}
+      # HuggingFace 오프라인 강제 (네트워크 다운로드 차단)
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+      HF_HOME: ${HF_HOME:-/app/models/hf_cache}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./var:/app/var
+      - ./models:/app/models:ro
+    restart: unless-stopped
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn nnm.main:app --host 0.0.0.0 --port 8170 --workers 1"

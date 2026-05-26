@@ -17,6 +17,9 @@ htmlcov/
 var/extracted/
 var/colbert/
 var/pgdata/
+var/.s3_count.json
+var/hf_cache/
+models/
 .dockerignore.local
 .DS_Store
 Thumbs.db
