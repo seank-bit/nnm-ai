@@ -20,6 +20,8 @@ var/pgdata/
 var/.s3_count.json
 var/hf_cache/
 models/
+publications_*.csv
+scripts/
 .dockerignore.local
 .DS_Store
 Thumbs.db

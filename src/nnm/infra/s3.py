@@ -53,3 +53,13 @@ class S3Loader:
         digest = hashlib.sha256(data).hexdigest()
         log.debug("s3.download", key=key, bytes=len(data))
         return data, digest
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=4))
+    async def upload_bytes(
+        self, key: str, data: bytes, content_type: str = "application/octet-stream",
+    ) -> None:
+        async with self._client_ctx() as s3:
+            await s3.put_object(
+                Bucket=self.bucket, Key=key, Body=data, ContentType=content_type,
+            )
+        log.debug("s3.upload", key=key, bytes=len(data), content_type=content_type)

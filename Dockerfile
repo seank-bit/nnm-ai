@@ -29,5 +29,5 @@ RUN uv pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
 
 FROM build-${DEVICE} AS final
 RUN mkdir -p /app/var/extracted /app/var/colbert
-EXPOSE 8170
-CMD ["uvicorn", "nnm.main:app", "--host", "0.0.0.0", "--port", "8170"]
+EXPOSE 80
+CMD ["uvicorn", "nnm.main:app", "--host", "0.0.0.0", "--port", "80"]

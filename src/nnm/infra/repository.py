@@ -93,3 +93,11 @@ class SqlBackfillRepository:
             .values(status="failed", error=reason[:1000])
         )
         await self.db.commit()
+
+    async def mark_item_skipped(self, job_id: int, s3_key: str, reason: str) -> None:
+        await self.db.execute(
+            update(IngestJobItem)
+            .where(IngestJobItem.job_id == job_id, IngestJobItem.s3_key == s3_key)
+            .values(status="skipped", error=reason[:1000])
+        )
+        await self.db.commit()

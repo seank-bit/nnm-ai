@@ -10,11 +10,18 @@
    NNM_S3_BUCKET=<your-bucket>
    AWS_ACCESS_KEY_ID=<key>
    AWS_SECRET_ACCESS_KEY=<secret>
+   NNM_PUBLICATION_CSV=/app/data/publications.csv
+   NNM_PUBLICATION_CSV_ENCODING=cp949
    ```
 
 2. AWS RDS PostgreSQL에 vector 확장 사전 설치 확인
-3. 운영 테이블 `publications`, `publication_files` 존재 확인
-4. Docker daemon 실행 확인
+3. publications 매핑 CSV (`publications_*.csv`) 를 repo root 에 둠 — docker-compose
+   가 `/app/data/publications.csv` 로 마운트
+4. **(prod 만)** 임베딩 모델 사전 다운로드:
+   ```bash
+   ./scripts/download_models.sh   # ./models/bge-m3/ 에 ~2.2GB
+   ```
+5. Docker daemon 실행 확인
 
 ## 절차
 
@@ -22,7 +29,7 @@
 ```bash
 docker compose up app
 ```
-기대: alembic upgrade head 후 0007 도달, `Uvicorn running on http://0.0.0.0:8170`
+기대: alembic upgrade head 후 0007 도달, `Uvicorn running on http://0.0.0.0:80`
 
 ### 2. 헬스/뷰어 확인
 ```bash

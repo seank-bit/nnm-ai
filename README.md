@@ -14,15 +14,23 @@ docker compose run --rm app python -m nnm.workers.backfill_cli ingest --prefix p
 docker compose run --rm app python -m nnm.workers.backfill_cli reset-db --force
 
 # 뷰어
-open http://localhost:8170/viewer/
+open http://localhost/viewer/
 ```
 
-## EC2 GPU
+## EC2 GPU (운영계)
 ```bash
-docker build --build-arg DEVICE=gpu -t nnm-ai:gpu .
-docker run --gpus all -e NNM_EMBEDDING_DEVICE=cuda -e NNM_EMBEDDING_FP16=true \
-  -e NNM_EMBEDDING_BATCH_SIZE=32 -e NNM_DB_URL=... nnm-ai:gpu \
-  python -m nnm.workers.backfill_cli ingest --prefix papers/
+# 1) 이미지 빌드
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+
+# 2) 임베딩 모델 1회 다운로드 (HF → ./models/bge-m3/, ~2.2GB)
+#    prod compose 는 HF_HUB_OFFLINE=1 이므로 미리 받아두어야 함.
+./scripts/download_models.sh
+
+# 3) publications 매핑 CSV 를 repo root 에 둠 (NNM_PUBLICATION_CSV 가 가리키는 경로)
+ls publications_*.csv
+
+# 4) prod 컨테이너 기동
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 설계: `docs/superpowers/specs/2026-05-19-nnm-ai-design.md`

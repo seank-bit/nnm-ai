@@ -19,6 +19,12 @@ class PdfExtractionError(NnmError):
     code = "pdf_extraction_failed"
 
 
+class OcrRequiredError(NnmError):
+    """1차 텍스트 추출이 비어 있는데 OCR fallback 이 비활성인 경우."""
+    status_code = 422
+    code = "ocr_required"
+
+
 class EmbeddingFailure(NnmError):
     status_code = 502
     code = "embedding_failed"

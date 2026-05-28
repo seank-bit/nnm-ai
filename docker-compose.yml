@@ -3,18 +3,25 @@ services:
     build:
       context: .
       args: { DEVICE: cpu }
+    # .env 의 모든 변수를 컨테이너에 그대로 주입.
+    # environment: 블록의 명시 값이 우선이지만, 거기 없는 변수도 .env 에서 자동 로드.
+    env_file:
+      - .env
     environment:
-      NNM_ENV: local
+      # 모든 값은 .env 가 우선. .env 에 없으면 아래 기본값(dev 가정).
+      NNM_ENV: ${NNM_ENV:-local}
       NNM_DB_URL: ${NNM_DB_URL}
       NNM_S3_BUCKET: ${NNM_S3_BUCKET}
       NNM_S3_REGION: ${NNM_S3_REGION:-ap-northeast-2}
       NNM_S3_PREFIX: ${NNM_S3_PREFIX:-papers/}
       NNM_S3_PDF_BUCKET: ${NNM_S3_PDF_BUCKET:-}
       NNM_S3_PDF_PREFIX: ${NNM_S3_PDF_PREFIX:-}
-      NNM_EMBEDDING_DEVICE: cpu
-      NNM_EMBEDDING_FP16: "false"
-      NNM_EMBEDDING_BATCH_SIZE: "4"
-      NNM_EMBEDDING_MAX_TOKENS: "8192"
+      NNM_S3_EXTRACTED_BUCKET: ${NNM_S3_EXTRACTED_BUCKET:-}
+      NNM_S3_EXTRACTED_PREFIX: ${NNM_S3_EXTRACTED_PREFIX:-newnonmuncom-extracted/}
+      NNM_EMBEDDING_DEVICE: ${NNM_EMBEDDING_DEVICE:-cpu}
+      NNM_EMBEDDING_FP16: ${NNM_EMBEDDING_FP16:-false}
+      NNM_EMBEDDING_BATCH_SIZE: ${NNM_EMBEDDING_BATCH_SIZE:-4}
+      NNM_EMBEDDING_MAX_TOKENS: ${NNM_EMBEDDING_MAX_TOKENS:-8192}
       NNM_EMBEDDING_COLBERT: ${NNM_EMBEDDING_COLBERT:-false}
       NNM_EMBEDDING_SPARSE: ${NNM_EMBEDDING_SPARSE:-true}
       NNM_CHUNK_SIZE_TOKENS: ${NNM_CHUNK_SIZE_TOKENS:-512}
@@ -22,11 +29,8 @@ services:
       NNM_STORAGE_ROOT: /app/var
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      DB_HOST: ${DB_HOST:-}
-      DB_PORT: ${DB_PORT:-3306}
-      DB_DATABASE: ${DB_DATABASE:-}
-      DB_USERNAME: ${DB_USERNAME:-}
-      DB_PASSWORD: ${DB_PASSWORD:-}
+      NNM_PUBLICATION_CSV: ${NNM_PUBLICATION_CSV:-/app/data/publications.csv}
+      NNM_PUBLICATION_CSV_ENCODING: ${NNM_PUBLICATION_CSV_ENCODING:-cp949}
       NNM_GROQ_API_KEY: ${NNM_GROQ_API_KEY:-}
       NNM_GROQ_MODEL: ${NNM_GROQ_MODEL:-llama-3.3-70b-versatile}
       NNM_GROQ_BASE_URL: ${NNM_GROQ_BASE_URL:-https://api.groq.com/openai/v1}
@@ -36,7 +40,8 @@ services:
     volumes:
       - ./var:/app/var
       - ./src:/app/src
-    ports: ["8170:8170"]
+      - ./publications_202605261041.csv:/app/data/publications.csv:ro
+    ports: ["80:80"]
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn nnm.main:app --host 0.0.0.0 --port 8170 --reload"
+             uvicorn nnm.main:app --host 0.0.0.0 --port 80 --reload"

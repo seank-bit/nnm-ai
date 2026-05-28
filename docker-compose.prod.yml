@@ -7,14 +7,53 @@
 #  - `docker compose -f docker-compose.yml -f docker-compose.prod.yml build` 로 GPU 이미지 빌드
 
 services:
+  hybrid:
+    # opendataloader-pdf 의 OCR 백엔드 (스캔 PDF 처리).
+    # app 이미지 위에 [hybrid] extras 만 추가. nnm-ai-app:latest 먼저 빌드 필요.
+    build:
+      context: .
+      dockerfile: Dockerfile.hybrid
+    image: nnm-ai-hybrid:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # 호스트 OOM 방지: 비정상 PDF 가 컨테이너 안에서만 OOM 으로 죽고
+    # restart 로 회복하도록 함. (이전: 호스트 전체 OOM 으로 인스턴스 다운.)
+    # memswap_limit == mem_limit → swap 으로 새지 않음.
+    mem_limit: 7g
+    memswap_limit: 7g
+    volumes:
+      # easyocr 모델 캐시 (~100MB, 첫 부팅 시 다운로드 후 호스트에 보존)
+      - ./var/easyocr:/app/var/easyocr
+    expose: ["5002"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
   app:
     build:
       args:
         DEVICE: gpu
+    depends_on:
+      hybrid:
+        condition: service_healthy
     environment:
       # prod 식별 + 로그
       NNM_ENV: ${NNM_ENV:-prod}
       NNM_LOG_LEVEL: ${NNM_LOG_LEVEL:-INFO}
+      # OCR (hybrid 서비스) — 스캔 PDF 처리용
+      NNM_HYBRID_URL: ${NNM_HYBRID_URL:-http://hybrid:5002}
+      # OCR 재시도 시(=1차 추출 결과 elements=0) 호출되는 hybrid 모드.
+      # full = 모든 페이지 백엔드로 강제 (스캔 PDF 전체 OCR).
+      NNM_HYBRID_MODE: ${NNM_HYBRID_MODE:-full}
       # DB 풀
       NNM_DB_POOL_SIZE: ${NNM_DB_POOL_SIZE:-10}
       NNM_DB_MAX_OVERFLOW: ${NNM_DB_MAX_OVERFLOW:-20}
@@ -39,10 +78,123 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    # 호스트 메모리 15Gi 중 hybrid 7g + app 5g + 호스트 여유 ~3g.
+    mem_limit: 5g
+    memswap_limit: 5g
     volumes:
       - ./var:/app/var
       - ./models:/app/models:ro
+      - ./publications_202605261041.csv:/app/data/publications.csv:ro
     restart: unless-stopped
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn nnm.main:app --host 0.0.0.0 --port 8170 --workers 1"
+             uvicorn nnm.main:app --host 0.0.0.0 --port 80 --workers 1"
+
+  # ---- Ingest 워커 (자동 재기동, hex prefix 순회) -----------------------
+  # 동작:
+  #   - app/hybrid 와 같은 GPU 이미지 사용 (이미 빌드된 nnm-ai-app:latest).
+  #   - shell loop 로 prefix 16개 (0~f) 를 두 워커가 8개씩 나눠 처리.
+  #   - file_hash dedup 으로 이미 처리된 PDF 는 빠르게 skip.
+  #   - 비정상 종료 (OOM/crash) 시 restart: on-failure 로 자동 복구.
+  #   - prefix 다 처리하고 정상 종료 (exit 0) 하면 멈춤 (무한 루프 방지).
+  ingest-w1:
+    image: nnm-ai-app:latest
+    depends_on:
+      hybrid:
+        condition: service_healthy
+    env_file: [.env]
+    environment:
+      NNM_ENV: ${NNM_ENV:-prod}
+      NNM_LOG_LEVEL: ${NNM_LOG_LEVEL:-INFO}
+      NNM_HYBRID_URL: ${NNM_HYBRID_URL:-http://hybrid:5002}
+      NNM_HYBRID_MODE: ${NNM_HYBRID_MODE:-full}
+      NNM_EMBEDDING_MODEL: ${NNM_EMBEDDING_MODEL:-/app/models/bge-m3}
+      NNM_EMBEDDING_DEVICE: ${NNM_EMBEDDING_DEVICE:-cuda}
+      NNM_EMBEDDING_FP16: ${NNM_EMBEDDING_FP16:-true}
+      NNM_EMBEDDING_BATCH_SIZE: ${NNM_EMBEDDING_BATCH_SIZE:-16}
+      NNM_EMBEDDING_MAX_TOKENS: ${NNM_EMBEDDING_MAX_TOKENS:-8192}
+      NNM_EMBEDDING_COLBERT: ${NNM_EMBEDDING_COLBERT:-false}
+      NNM_EMBEDDING_SPARSE: ${NNM_EMBEDDING_SPARSE:-true}
+      NNM_PDF_THREADS: ${NNM_PDF_THREADS:-4}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+      HF_HOME: ${HF_HOME:-/app/models/hf_cache}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    mem_limit: 5g
+    memswap_limit: 5g
+    volumes:
+      - ./var:/app/var
+      - ./models:/app/models:ro
+      - ./publications_202605261041.csv:/app/data/publications.csv:ro
+      # 이미지 rebuild 없이 코드 변경 즉시 반영 (PdfExtractor 사전 필터 등).
+      - ./src:/app/src:ro
+    restart: on-failure
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        for p in 0 1 2 3 4 5 6 7; do
+          echo "[w1] starting prefix $$p"
+          python -m nnm.workers.backfill_cli ingest \
+            --prefix "newnonmuncom-pdf/$$p" \
+            --job-name "auto-w1-$$p-$$(date +%s)" || echo "[w1] prefix $$p failed, continuing"
+        done
+        echo "[w1] all prefixes done"
+
+  ingest-w2:
+    image: nnm-ai-app:latest
+    depends_on:
+      hybrid:
+        condition: service_healthy
+    env_file: [.env]
+    environment:
+      NNM_ENV: ${NNM_ENV:-prod}
+      NNM_LOG_LEVEL: ${NNM_LOG_LEVEL:-INFO}
+      NNM_HYBRID_URL: ${NNM_HYBRID_URL:-http://hybrid:5002}
+      NNM_HYBRID_MODE: ${NNM_HYBRID_MODE:-full}
+      NNM_EMBEDDING_MODEL: ${NNM_EMBEDDING_MODEL:-/app/models/bge-m3}
+      NNM_EMBEDDING_DEVICE: ${NNM_EMBEDDING_DEVICE:-cuda}
+      NNM_EMBEDDING_FP16: ${NNM_EMBEDDING_FP16:-true}
+      NNM_EMBEDDING_BATCH_SIZE: ${NNM_EMBEDDING_BATCH_SIZE:-16}
+      NNM_EMBEDDING_MAX_TOKENS: ${NNM_EMBEDDING_MAX_TOKENS:-8192}
+      NNM_EMBEDDING_COLBERT: ${NNM_EMBEDDING_COLBERT:-false}
+      NNM_EMBEDDING_SPARSE: ${NNM_EMBEDDING_SPARSE:-true}
+      NNM_PDF_THREADS: ${NNM_PDF_THREADS:-4}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+      HF_HOME: ${HF_HOME:-/app/models/hf_cache}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    mem_limit: 5g
+    memswap_limit: 5g
+    volumes:
+      - ./var:/app/var
+      - ./models:/app/models:ro
+      - ./publications_202605261041.csv:/app/data/publications.csv:ro
+      # 이미지 rebuild 없이 코드 변경 즉시 반영 (PdfExtractor 사전 필터 등).
+      - ./src:/app/src:ro
+    restart: on-failure
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        for p in 8 9 a b c d e f; do
+          echo "[w2] starting prefix $$p"
+          python -m nnm.workers.backfill_cli ingest \
+            --prefix "newnonmuncom-pdf/$$p" \
+            --job-name "auto-w2-$$p-$$(date +%s)" || echo "[w2] prefix $$p failed, continuing"
+        done
+        echo "[w2] all prefixes done"

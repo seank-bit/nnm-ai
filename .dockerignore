@@ -10,3 +10,5 @@ var/pgdata
 .pytest_cache
 docs
 tests
+models
+publications_*.csv

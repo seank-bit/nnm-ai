@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Any
 
 import structlog
 from sqlalchemy import select
@@ -105,7 +106,14 @@ async def answer(
     embedder: LocalEmbedder,
     settings: Settings,
     question: str,
+    *,
+    client: Any = None,
+    model_label: str | None = None,
 ) -> RagAnswer:
+    """RAG 답변 생성.
+
+    client 미지정 시 GroqClient 기본 사용. 평가용으로 BedrockClient 같은 다른 공급자 주입 가능.
+    """
     chunks = await retrieve(db, embedder, question, top_k=settings.rag_top_k)
     context = _build_context(chunks, settings.rag_max_context_chars)
     user_prompt = (
@@ -113,11 +121,13 @@ async def answer(
         f"컨텍스트:\n{context if context else '(검색된 내용 없음)'}\n\n"
         "위 컨텍스트만 사용해 한국어로 답하세요."
     )
-    client = GroqClient(
-        api_key=settings.groq_api_key or "",
-        model=settings.groq_model,
-        base_url=settings.groq_base_url,
-    )
+    if client is None:
+        client = GroqClient(
+            api_key=settings.groq_api_key or "",
+            model=settings.groq_model,
+            base_url=settings.groq_base_url,
+        )
+        model_label = settings.groq_model
     reply = await client.chat(
         [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -125,4 +135,7 @@ async def answer(
         ],
         temperature=settings.rag_temperature,
     )
-    return RagAnswer(question=question, answer=reply, chunks=chunks, model=settings.groq_model)
+    return RagAnswer(
+        question=question, answer=reply, chunks=chunks,
+        model=model_label or getattr(client, "model", "unknown"),
+    )

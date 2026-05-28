@@ -1,0 +1,30 @@
+# opendataloader-pdf hybrid (OCR) 백엔드 전용 이미지.
+# nnm-ai-app:latest 위에 [hybrid] extras 만 추가 → 베이스 layer 재사용.
+#
+# 빌드 전제:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build app
+#   (nnm-ai-app:latest 가 먼저 빌드돼 있어야 함)
+#
+# 빌드:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build hybrid
+
+FROM nnm-ai-app:latest
+
+# typer 다운그레이드 경고가 있지만 hybrid 컨테이너는 typer CLI 안 씀 (서버만)
+# easyocr 모델 다운로드 디렉토리. 첫 부팅 시 ~100MB 받음 (호스트 볼륨에 캐시 권장)
+ENV EASYOCR_MODULE_PATH=/app/var/easyocr \
+    HF_HOME=/app/var/hf_cache
+
+RUN uv pip install --python /opt/venv/bin/python --no-cache 'opendataloader-pdf[hybrid]'
+
+EXPOSE 5002
+
+# 한국어/영어 OCR. device=auto 로 GPU 있으면 사용.
+# --force-ocr 로 텍스트 있어도 OCR 강제 (스캔 PDF 대응).
+# 텍스트 PDF 에 부담 발생 → app 쪽에서 hybrid_mode=auto 로 triage 제어.
+CMD ["opendataloader-pdf-hybrid", \
+     "--port", "5002", \
+     "--ocr-engine", "easyocr", \
+     "--ocr-lang", "ko,en", \
+     "--force-ocr", \
+     "--device", "auto"]
