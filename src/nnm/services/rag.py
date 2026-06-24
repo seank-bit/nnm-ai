@@ -29,6 +29,8 @@ class RetrievedChunk:
     seq: int
     text: str
     score: float
+    # papers.s3_key 원본 (예: "newnonmuncom-pdf/abc123"). API 응답은 prefix strip.
+    s3_key: str | None = None
 
 
 @dataclass
@@ -60,6 +62,7 @@ async def retrieve(
             Chunk.section,
             Chunk.text,
             Paper.title,
+            Paper.s3_key,
         )
         .join(Chunk, Chunk.id == ChunkEmbedding.chunk_id)
         .join(Paper, Paper.id == Chunk.paper_id)
@@ -76,6 +79,7 @@ async def retrieve(
             seq=r.seq,
             text=r.text,
             score=1.0 - float(r.distance),
+            s3_key=r.s3_key,
         )
         for r in rows
     ]

@@ -78,9 +78,11 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    # 호스트 메모리 15Gi 중 hybrid 7g + app 5g + 호스트 여유 ~3g.
-    mem_limit: 5g
-    memswap_limit: 5g
+    # embed-from-extracted 멀티 워커 (3 프로세스 × ~3GB) 수용 위해 5g → 12g.
+    # 호스트 메모리 15Gi 중 hybrid 7g + app 12g 합 19g 는 cap 합산일 뿐,
+    # 실 사용은 app 측이 hybrid 만큼 안 차서 OK.
+    mem_limit: 12g
+    memswap_limit: 12g
     volumes:
       - ./var:/app/var
       - ./models:/app/models:ro

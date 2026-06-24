@@ -82,6 +82,61 @@ def reocr(
     asyncio.run(_run_reocr(limit=limit, job_name=job_name))
 
 
+@app.command(name="embed-from-extracted")
+def embed_from_extracted(
+    since: str | None = typer.Option(
+        None,
+        help="LastModified >= 이 시각의 .json 만 처리. "
+             "YYYY-MM-DD (UTC 자정) 또는 ISO-8601. "
+             "미지정 시 날짜 필터 없음 (전체 .json 처리).",
+    ),
+    prefix: str | None = typer.Option(
+        None,
+        help="extracted prefix override. 기본: settings.s3_extracted_prefix.",
+    ),
+    limit: int | None = typer.Option(None, help="처리 개수 제한"),
+    watch: bool = typer.Option(
+        False, "--watch", help="True 면 한 라운드 후 종료하지 않고 주기 재스캔.",
+    ),
+    watch_interval_s: int = typer.Option(
+        300, help="watch 모드 sleep 초 (기본 5분)",
+    ),
+    job_name: str = typer.Option(
+        "embed-extracted", help="ingest_jobs.job_name",
+    ),
+    shard: str | None = typer.Option(
+        None, "--shard",
+        help="멀티 워커 분산. 형식 'i/N' (예: 0/3, 1/3, 2/3). "
+             "각 워커는 crc32(stem) % N == i 인 키만 처리. None=모든 키.",
+    ),
+) -> None:
+    """S3 extracted .json 을 읽어 chunks + embeddings 적재. PDF 미사용.
+
+    .json 안의 file_hash (tools/local_extract.py 가 주입) 로 dedup.
+    --watch 시 watch_interval_s 마다 재스캔하면서 신규 .json 만 추가 처리.
+    --shard 로 여러 프로세스 분산 처리 가능 (각 프로세스 자체 GPU 모델 인스턴스).
+    """
+    shard_i, shard_n = _parse_shard(shard)
+    asyncio.run(_run_embed_from_extracted(
+        since=since, prefix=prefix, limit=limit,
+        watch=watch, watch_interval_s=watch_interval_s, job_name=job_name,
+        shard_i=shard_i, shard_n=shard_n,
+    ))
+
+
+def _parse_shard(shard: str | None) -> tuple[int | None, int | None]:
+    if not shard:
+        return None, None
+    try:
+        i_str, n_str = shard.split("/", 1)
+        i, n = int(i_str), int(n_str)
+        if not (0 <= i < n) or n <= 0:
+            raise ValueError
+        return i, n
+    except Exception:
+        raise typer.BadParameter(f"--shard 는 'i/N' 형식이어야 함 (예: 0/3). got={shard!r}")
+
+
 @app.command(name="extract-only")
 def extract_only(
     prefix: str = typer.Option("", help="S3 prefix (PDF 버킷). 미지정 시 settings 사용."),
@@ -270,6 +325,181 @@ async def _run_ingest(
                 break
 
         await _finalize_job(session, job_id, processed=processed)
+
+
+def _parse_since(since: str | None) -> datetime | None:
+    """YYYY-MM-DD 또는 ISO-8601 → UTC datetime. None/빈문자열 → None (필터 미적용)."""
+    if not since or not since.strip():
+        return None
+    s = since.strip()
+    if len(s) == 10 and s.count("-") == 2:
+        return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def _run_embed_from_extracted(
+    *, since: str | None, prefix: str | None, limit: int | None,
+    watch: bool, watch_interval_s: int, job_name: str,
+    shard_i: int | None, shard_n: int | None,
+) -> None:
+    import zlib
+    settings = get_settings()
+    storage_root = Path(settings.storage_root)
+    storage_root.mkdir(parents=True, exist_ok=True)
+
+    since_dt = _parse_since(since)
+    log.info(
+        "embed_extracted.config",
+        since=since_dt.isoformat() if since_dt else None,
+        watch=watch, interval_s=watch_interval_s,
+    )
+    typer.echo(
+        f"since = {since_dt.isoformat() if since_dt else '(none — process all)'}"
+        f"  watch={watch}"
+    )
+
+    # extracted bucket 클라이언트가 우선 필요 (download + list)
+    uploader, default_prefix = _build_extracted_uploader(settings)
+    if uploader is None:
+        typer.echo("ERROR: extracted bucket/prefix 미설정 (NNM_S3_EXTRACTED_*).")
+        raise typer.Exit(code=1)
+    ext_prefix = prefix or default_prefix
+    typer.echo(f"extracted = s3://{uploader.bucket}/{ext_prefix!r}")
+
+    # 일반 backfill 파이프라인 wiring (PdfExtractor 는 호출 안 되지만 필드 필요)
+    s3_bucket = settings.s3_pdf_bucket or settings.s3_bucket
+    s3 = S3Loader(bucket=s3_bucket, region=settings.s3_region)
+    extractor = PdfExtractor(
+        threads=settings.pdf_threads,
+        hybrid_url=settings.hybrid_url,
+        hybrid_mode=settings.hybrid_mode,
+        hybrid_timeout_ms=settings.hybrid_timeout_ms,
+        extract_timeout_s=settings.pdf_extract_timeout_s,
+        skip_ocr=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(settings.embedding_model)
+    chunker = Chunker(
+        tokenizer=tokenizer,
+        target_tokens=settings.chunk_size_tokens,
+        overlap_tokens=settings.chunk_overlap_tokens,
+    )
+    embedder = LocalEmbedder(settings=settings)
+    embedder.load()
+    mapper = PublicationMapper(
+        csv_path=settings.publication_csv,
+        encoding=settings.publication_csv_encoding,
+    )
+    failed_record_path = _resolve_failed_record_path(settings)
+
+    pdf_prefix = settings.s3_pdf_prefix or settings.s3_prefix or ""
+
+    factory = get_factory()
+    processed_total = 0
+    seen_keys: set[str] = set()  # watch 라운드 간 중복 처리 방지
+
+    round_idx = 0
+    while True:
+        round_idx += 1
+        async with factory() as session:
+            repo = SqlBackfillRepository(db=session)
+            svc = BackfillService(
+                s3=s3, repo=repo, mapper=mapper,
+                extractor=extractor, chunker=chunker, embedder=embedder,
+                storage_root=storage_root,
+                extracted_uploader=uploader,
+                extracted_prefix=ext_prefix,
+                failed_record_path=failed_record_path,
+                pdf_prefix=pdf_prefix,
+            )
+            shard_suffix = (
+                f"-s{shard_i}" if shard_n is not None else ""
+            )
+            job_id = await _create_job(
+                session,
+                job_name=f"{job_name}{shard_suffix}-r{round_idx}",
+                prefix=ext_prefix,
+            )
+
+            # scan extracted prefix → (since 가 있으면 LastModified 필터) → .json 만
+            # → (shard 가 있으면 crc32(stem) % N == i 만)
+            scanned = 0
+            candidates: list[str] = []
+            async for key, meta in uploader.list_keys_with_meta(ext_prefix):
+                scanned += 1
+                if not key.endswith(".json"):
+                    continue
+                if since_dt is not None:
+                    lm = meta.get("last_modified")
+                    if lm is None or lm < since_dt:
+                        continue
+                if shard_n is not None and shard_i is not None:
+                    name = key.rsplit("/", 1)[-1]
+                    stem = name.rsplit(".", 1)[0]
+                    if zlib.crc32(stem.encode()) % shard_n != shard_i:
+                        continue
+                if key in seen_keys:
+                    continue
+                candidates.append(key)
+
+            since_label = (
+                f"since={since_dt.date()}" if since_dt is not None else "all"
+            )
+            shard_label = (
+                f" shard={shard_i}/{shard_n}"
+                if shard_n is not None else ""
+            )
+            typer.echo(
+                f"[round {round_idx}{shard_label}] scanned={scanned} "
+                f"candidates(.json {since_label})={len(candidates)}"
+            )
+
+            ok = skipped = failed_cnt = 0
+            for key in candidates:
+                if limit is not None and processed_total >= limit:
+                    break
+                seen_keys.add(key)
+                await _enqueue_item(session, job_id, key)
+                try:
+                    result = await svc.process_extracted_one(
+                        job_id=job_id, extracted_json_key=key,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    log.error(
+                        "embed_extracted.unhandled",
+                        key=key, error=str(e),
+                    )
+                    failed_cnt += 1
+                    processed_total += 1
+                    continue
+                if result == "ok":
+                    ok += 1
+                elif result == "skipped":
+                    skipped += 1
+                else:
+                    failed_cnt += 1
+                processed_total += 1
+
+            await _finalize_job(session, job_id, processed=ok + skipped + failed_cnt)
+            typer.echo(
+                f"[round {round_idx}] ok={ok} skipped={skipped} "
+                f"failed={failed_cnt} (total processed={processed_total})"
+            )
+
+        if limit is not None and processed_total >= limit:
+            typer.echo(f"limit={limit} 도달 → 종료")
+            break
+        if not watch:
+            break
+        typer.echo(f"watch sleep {watch_interval_s}s ...")
+        await asyncio.sleep(watch_interval_s)
+
+    log.info(
+        "embed_extracted.done",
+        rounds=round_idx, processed_total=processed_total,
+    )
 
 
 async def _run_extract_only(

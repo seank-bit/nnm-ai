@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,7 +15,7 @@ from nnm.errors import NnmError, OcrRequiredError
 from nnm.infra.local_embedder import LocalEmbedder
 from nnm.infra.s3 import S3Loader
 from nnm.services.chunker import Chunker
-from nnm.services.pdf_extractor import PdfExtraction, PdfExtractor
+from nnm.services.pdf_extractor import PdfExtraction, PdfExtractor, _normalize_doc
 from nnm.services.publication_mapper import PublicationMapper
 from nnm.services.repository import BackfillRepository
 from nnm.services.title_filter import is_garbage_title
@@ -39,6 +40,9 @@ class BackfillService:
     # 추출 단계 실패 (timeout / subprocess 비정상 종료 등) PDF 를 한 줄씩 append.
     # 사이즈 제한은 두지 않고, 일단 skip 한 뒤 나중에 일괄 재처리할 수 있도록 기록만 남김.
     failed_record_path: Path | None = None
+    # PDF s3_key 재구성용 prefix. extracted .json 의 stem 으로 PDF key 매칭할 때 사용.
+    # 예: pdf_prefix="newnonmuncom-pdf/", stem="abc123" → "newnonmuncom-pdf/abc123"
+    pdf_prefix: str = ""
 
     async def process_one(
         self, *, job_id: int, s3_key: str,
@@ -128,6 +132,174 @@ class BackfillService:
             return "failed"
         await self.repo.mark_item_done(job_id, s3_key, paper_id=paper_id)
         log.info("backfill.ok", s3_key=s3_key, paper_id=paper_id, chunks=len(drafts))
+        return "ok"
+
+    async def process_extracted_one(
+        self, *, job_id: int, extracted_json_key: str,
+    ) -> Literal["ok", "skipped", "failed"]:
+        """이미 추출된 .json 을 입력으로 chunks + embeddings + paper row 만 생성.
+
+        PDF download / PdfExtractor 미사용.
+
+        Dedup 우선순위:
+        1. extracted_json_key 의 stem 으로 PDF s3_key 재구성 → papers.s3_key 일치 시 skip
+           (downloads 전에 끊어 대역폭 절약)
+        2. JSON 다운로드 후 file_hash (tools/local_extract.py 가 주입) 또는
+           JSON 내용 SHA256 (폴백) 로 papers.file_hash 재확인 → 일치 시 skip
+        """
+        if self.extracted_uploader is None:
+            raise RuntimeError(
+                "process_extracted_one: extracted_uploader is required for downloads"
+            )
+
+        # 0. stem 기반으로 PDF s3_key 후보 산출 (다운로드 전 사전 dedup)
+        name = extracted_json_key.rsplit("/", 1)[-1]
+        stem = name.rsplit(".", 1)[0] if "." in name else name
+        candidate_pdf_key = f"{self.pdf_prefix}{stem}"
+
+        existing_by_key = await self.repo.find_paper_by_s3_key(candidate_pdf_key)
+        if existing_by_key is not None:
+            await self.repo.mark_item_done(
+                job_id, candidate_pdf_key, paper_id=existing_by_key,
+            )
+            log.info(
+                "embed_extracted.skipped_existing_s3_key",
+                key=extracted_json_key, s3_key=candidate_pdf_key,
+                paper_id=existing_by_key,
+            )
+            return "skipped"
+
+        # 1. JSON 다운로드
+        try:
+            json_bytes, _ = await self.extracted_uploader.download(extracted_json_key)
+        except NnmError as e:
+            await self.repo.mark_item_failed(job_id, extracted_json_key, str(e))
+            return "failed"
+
+        # 2. parse
+        try:
+            raw = json.loads(json_bytes)
+        except json.JSONDecodeError as e:
+            await self.repo.mark_item_failed(
+                job_id, extracted_json_key, f"json parse: {e}",
+            )
+            return "failed"
+
+        # 3. source_s3_key 결정. JSON 안의 값 우선, 없으면 stem 기반 폴백.
+        source_s3_key = raw.get("source_s3_key") or candidate_pdf_key
+        item_key = source_s3_key
+
+        # 만약 JSON 의 source_s3_key 가 후보와 다르면 한 번 더 dedup 체크
+        if source_s3_key != candidate_pdf_key:
+            existing_by_key = await self.repo.find_paper_by_s3_key(source_s3_key)
+            if existing_by_key is not None:
+                await self.repo.mark_item_done(
+                    job_id, source_s3_key, paper_id=existing_by_key,
+                )
+                return "skipped"
+
+        # 4. file_hash 결정. PDF SHA256 (local_extract.py 주입) 우선, 없으면 JSON 폴백.
+        raw_hash = raw.get("file_hash")
+        if isinstance(raw_hash, str) and len(raw_hash) == 64:
+            file_hash = raw_hash
+            hash_source = "pdf_sha256"
+        else:
+            file_hash = hashlib.sha256(json_bytes).hexdigest()
+            hash_source = "json_sha256_fallback"
+            log.info(
+                "embed_extracted.hash_fallback",
+                key=extracted_json_key, reason="missing_or_invalid_file_hash",
+            )
+
+        # 5. file_hash dedup (2차 — 같은 PDF 가 다른 s3_key 로 들어왔을 수도)
+        existing_by_hash = await self.repo.find_paper_by_hash(file_hash)
+        if existing_by_hash is not None:
+            await self.repo.mark_item_done(
+                job_id, item_key, paper_id=existing_by_hash,
+            )
+            log.info(
+                "embed_extracted.skipped_existing_hash",
+                key=extracted_json_key, file_hash=file_hash,
+                paper_id=existing_by_hash, source=hash_source,
+            )
+            return "skipped"
+
+        # 6. 매핑
+        mapping = await self.mapper.lookup(source_s3_key)
+        title = mapping.title if mapping else None
+        external_id = mapping.publication_id if mapping else None
+
+        # 7. normalize
+        json_doc = _normalize_doc(raw)
+        title = title or _fallback_title(json_doc)
+        language = _detect_language(json_doc)
+
+        # 8. paper 적재. raw_json_path/raw_md_path 는 이미 S3 에 있는 산출물 키.
+        md_key = (
+            extracted_json_key[:-5] + ".md"
+            if extracted_json_key.endswith(".json") else None
+        )
+        meta = PaperMeta(
+            s3_key=source_s3_key, file_hash=file_hash,
+            external_id=external_id, title=title, language=language,
+            raw_json_path=extracted_json_key,
+            raw_md_path=md_key,
+            page_count=_count_pages(json_doc),
+        )
+        paper_id = await self.repo.insert_paper(meta)
+
+        # 7. chunk
+        drafts = list(self.chunker.chunk(
+            json_doc, paper_title=title, language=language,
+        ))
+        if not drafts:
+            await self.repo.mark_item_done(job_id, item_key, paper_id=paper_id)
+            log.info(
+                "embed_extracted.no_chunks",
+                key=extracted_json_key, paper_id=paper_id,
+            )
+            return "ok"
+
+        # 8. embed + insert
+        try:
+            chunk_ids = await self.repo.insert_chunks(paper_id, drafts)
+            settings = self.embedder.settings
+            payload = await self.embedder.embed(
+                [d.text_for_embed for d in drafts],
+                return_dense=True,
+                return_sparse=settings.embedding_sparse,
+                return_colbert=settings.embedding_colbert,
+            )
+            colbert_paths: list[str | None] = [None] * len(chunk_ids)
+            if settings.embedding_colbert:
+                colbert_dir = self.storage_root / "colbert"
+                colbert_dir.mkdir(parents=True, exist_ok=True)
+                for i, (cid, vec) in enumerate(zip(chunk_ids, payload.colbert)):
+                    if vec is None:
+                        continue
+                    p = colbert_dir / f"{cid}.npy"
+                    np.save(p, vec)
+                    colbert_paths[i] = str(p.relative_to(self.storage_root))
+            await self.repo.insert_embeddings(
+                chunk_ids=chunk_ids, dense=payload.dense,
+                sparse=payload.sparse, colbert_paths=colbert_paths,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "embed_extracted.partial_failure",
+                key=extracted_json_key, paper_id=paper_id, error=str(e),
+            )
+            await self.repo.delete_paper(paper_id)
+            await self.repo.mark_item_failed(
+                job_id, item_key, f"post-insert failure: {e}",
+            )
+            return "failed"
+
+        await self.repo.mark_item_done(job_id, item_key, paper_id=paper_id)
+        log.info(
+            "embed_extracted.ok",
+            key=extracted_json_key, paper_id=paper_id, chunks=len(drafts),
+        )
         return "ok"
 
 

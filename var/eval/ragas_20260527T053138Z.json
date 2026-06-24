@@ -1,0 +1,16 @@
+{
+  "timestamp": "20260527T053138Z",
+  "git_sha": "unknown",
+  "model": "llama-3.3-70b-versatile",
+  "embedding_model": "/app/models/bge-m3",
+  "top_k": 5,
+  "temperature": 0.2,
+  "n_samples": 30,
+  "judge_model": "llama-3.3-70b-versatile",
+  "summary": {
+    "faithfulness": 0.8933333333333331,
+    "context_recall": 0.77,
+    "context_precision": 0.7797685185185185,
+    "answer_relevancy": 0.8804139510890242
+  }
+}

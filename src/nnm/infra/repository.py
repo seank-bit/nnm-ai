@@ -26,6 +26,13 @@ class SqlBackfillRepository:
         row = result.first()
         return row[0] if row else None
 
+    async def find_paper_by_s3_key(self, s3_key: str) -> int | None:
+        result = await self.db.execute(
+            select(Paper.id).where(Paper.s3_key == s3_key)
+        )
+        row = result.first()
+        return row[0] if row else None
+
     async def insert_paper(self, meta: PaperMeta) -> int:
         paper = Paper(
             s3_key=meta.s3_key, file_hash=meta.file_hash,

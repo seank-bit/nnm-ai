@@ -33,6 +33,19 @@ class S3Loader:
             for obj in page.get("Contents", []):
                 yield obj["Key"]
 
+    async def list_keys_with_meta(
+        self, prefix: str,
+    ) -> AsyncIterator[tuple[str, dict]]:
+        """list_keys + LastModified/Size/ETag 메타. embed-from-extracted 의
+        날짜 필터링 용도."""
+        async for page in self._paginate(prefix):
+            for obj in page.get("Contents", []):
+                yield obj["Key"], {
+                    "last_modified": obj.get("LastModified"),
+                    "size": obj.get("Size"),
+                    "etag": obj.get("ETag"),
+                }
+
     async def count_objects(self, prefix: str) -> int:
         total = 0
         async for page in self._paginate(prefix):

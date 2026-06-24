@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 from starlette.responses import Response
 
+from nnm.api.rag_router import router as rag_api_router
 from nnm.api.viewer.router import router as viewer_router
 from nnm.config import get_settings
 from nnm.errors import register_exception_handlers
@@ -79,6 +80,7 @@ def create_app(*, load_model: bool = True) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(viewer_router, prefix="/viewer", tags=["viewer"])
+    app.include_router(rag_api_router, prefix="/api", tags=["api"])
     app.mount("/metrics", make_asgi_app())
 
     # RAGAS 평가 결과 (CSV/PNG/HTML) 정적 서빙. /eval/ 로 접근.

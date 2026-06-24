@@ -169,10 +169,23 @@ class PdfExtractor:
 def _normalize_doc(raw: dict) -> dict:
     elements: list[dict] = []
     _walk_kids(raw.get("kids", []), elements)
+    # PostgreSQL UTF-8 컬럼은 0x00 byte 거부.
+    # PDF 추출 시 인코딩 잔재로 텍스트 사이 '\x00' 가 섞이는 케이스 있음
+    # (예: 'ISSN:\x00 2383-8892'). chunks / paper.title 모두 보호.
+    for el in elements:
+        t = el.get("text")
+        if isinstance(t, str) and "\x00" in t:
+            el["text"] = t.replace("\x00", "")
+    title = _decode_pdf_title(raw.get("title"))
+    if isinstance(title, str) and "\x00" in title:
+        title = title.replace("\x00", "")
+    author = _decode_pdf_title(raw.get("author"))
+    if isinstance(author, str) and "\x00" in author:
+        author = author.replace("\x00", "")
     return {
         "metadata": {
-            "title": _decode_pdf_title(raw.get("title")),
-            "author": _decode_pdf_title(raw.get("author")),
+            "title": title,
+            "author": author,
             "language": None,
         },
         "elements": elements,
